@@ -47,7 +47,9 @@ IWDG_HandleTypeDef hiwdg;
 TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
-
+FDCAN_TxHeaderTypeDef txHeader = {0};
+uint8_t txData[2];
+uint32_t last_uptime_tx = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,10 +60,13 @@ static void MX_IWDG_Init(void);
 static void MX_FDCAN1_Init(void);
 /* USER CODE BEGIN PFP */
 
+static void configure_uptime_tx_header(FDCAN_TxHeaderTypeDef *header);
+static void prepare_uptime_payload(uint8_t data[2]);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 
 /* USER CODE END 0 */
 
@@ -99,6 +104,13 @@ int main(void)
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim6);
+  configure_uptime_tx_header(&txHeader);
+  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
+  {
+      Error_Handler();
+  }
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -106,7 +118,18 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	  uint32_t now = HAL_GetTick();
 
+	  if ((now - last_uptime_tx) >= 1000U) {
+		    last_uptime_tx = now;
+	        prepare_uptime_payload(txData);
+
+	        if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, txData) != HAL_OK) {
+	             Error_Handler();
+	        }
+	  }
+
+	  HAL_IWDG_Refresh(&hiwdg);
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -306,6 +329,25 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if(htim->Instance == TIM6){
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 	}
+}
+
+static void configure_uptime_tx_header(FDCAN_TxHeaderTypeDef *header){
+	txHeader.Identifier = 0x738;
+	txHeader.IdType = FDCAN_STANDARD_ID;
+	txHeader.TxFrameType = FDCAN_DATA_FRAME;
+	txHeader.DataLength = FDCAN_DLC_BYTES_2;
+	txHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+	txHeader.BitRateSwitch = FDCAN_BRS_OFF;
+	txHeader.FDFormat = FDCAN_CLASSIC_CAN;
+	txHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+	txHeader.MessageMarker = 0;
+}
+
+static void prepare_uptime_payload(uint8_t data[2]){
+	uint16_t uptime_seconds = (uint16_t)(HAL_GetTick() / 1000U);
+
+	data[0] = (uint8_t)(uptime_seconds >> 8);
+    data[1] = (uint8_t)(uptime_seconds & 0xFFU);
 }
 
 /* USER CODE END 4 */
